@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Threading;
 using Archipelago.MultiClient.Net;
 using Archipelago.MultiClient.Net.Enums;
 using Archipelago.MultiClient.Net.Packets;
@@ -27,16 +26,19 @@ namespace APDataStorageScanner
 
 	    static ArchipelagoSession session;
 
-        static void Main(string[] args)
+        static void Main()
         {
 	        session = ArchipelagoSessionFactory.CreateSession("localhost");
-			session.TryConnectAndLogin("Archipelago", "Spectator", new Version(0, 2, 4), ItemsHandlingFlags.NoItems, new List<string> { "IgnoreGame", "TextOnly" });
+			session.TryConnectAndLogin("Archipelago", "Spectator", new Version(0, 3, 0), ItemsHandlingFlags.NoItems, new [] { "IgnoreGame", "TextOnly" });
 
-			session.DataStorage.Initialize("key", 0);
+			session.DataStorage["DataStorageScanner_FoundKeys"].Initialize(Array.Empty<string>());
+            session.DataStorage["DataStorageScanner_LastQuery"].Initialize(Array.Empty<int>());
 
-			session.Socket.PacketReceived += PacketReceived;
+            session.Socket.PacketReceived += PacketReceived;
 
 			FindDataStorageKeys();
+
+			Console.WriteLine($"Found keys are: {string.Join(", ", session.DataStorage["DataStorageScanner_FoundKeys"].To<string[]>())}");
 
 			Console.ReadLine();
         }
@@ -47,23 +49,32 @@ namespace APDataStorageScanner
 
 			foreach (var data in retrievedPacket.Data)
 			{
-				if (data.Value.Type != JTokenType.Null)
-					Console.WriteLine($"Found key: {data.Key}, with value: {data.Value}");
+                if (data.Value.Type != JTokenType.Null)
+                {
+					if (data.Key == "DataStorageScanner_FoundKeys" || data.Key == "DataStorageScanner_LastQuery")
+						continue;
+                    
+                    Console.WriteLine($"Found key: {data.Key}, with value: {data.Value}");
+
+					session.DataStorage["DataStorageScanner_FoundKeys"] += new []{ data.Key };
+				}
 			}
 		}
 
 		static void FindDataStorageKeys()
         {
-	        List<int> chars = new List<int>(MaxKeySize);
-	        List<string> keys = new List<string>(BatchSize);
+	        List<int> chars = session.DataStorage["DataStorageScanner_LastQuery"].To<List<int>>();
+			List<string> keys = new List<string>(BatchSize);
 
 	        while (chars.Count <= MaxKeySize)
 	        {
 		        keys.Add(IncrementChar(chars, 0));
 
 		        if (keys.Count >= BatchSize)
-		        {
-			        QueryKeys(keys);
+                {
+                    session.DataStorage["DataStorageScanner_LastQuery"] = chars;
+
+                    QueryKeys(keys);
 
 					keys.Clear();
 		        }
