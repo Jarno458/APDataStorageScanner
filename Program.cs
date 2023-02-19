@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using Archipelago.MultiClient.Net;
 using Archipelago.MultiClient.Net.Enums;
 using Archipelago.MultiClient.Net.Packets;
@@ -11,7 +12,7 @@ namespace APDataStorageScanner
     class Program
     {
 	    const int MaxKeySize = 20;
-		const int BatchSize = 10000;
+        const int BatchSize = 10000;
 
 	    static char[] charactersToTest =
 	    {
@@ -28,17 +29,40 @@ namespace APDataStorageScanner
 
         static void Main()
         {
-	        session = ArchipelagoSessionFactory.CreateSession("localhost");
-			session.TryConnectAndLogin("Archipelago", "Spectator", new Version(0, 3, 0), ItemsHandlingFlags.NoItems, new [] { "IgnoreGame", "TextOnly" });
+	        session = ArchipelagoSessionFactory.CreateSession("archipelago.gg");
 
-			session.DataStorage["DataStorageScanner_FoundKeys"].Initialize(Array.Empty<string>());
+			var result = session.TryConnectAndLogin("", "Jarno", ItemsHandlingFlags.NoItems, tags: new [] { "TextOnly" });
+            if (!result.Successful)
+            {
+                Console.WriteLine($"Failed to connect {string.Join(", ", ((LoginFailure)result).Errors)}");
+                Console.ReadLine();
+				return;
+            }
+			
+            session.DataStorage["DataStorageScanner_FoundKeys"].Initialize(Array.Empty<string>());
             session.DataStorage["DataStorageScanner_LastQuery"].Initialize(Array.Empty<int>());
 
-            session.Socket.PacketReceived += PacketReceived;
+            Console.WriteLine($"Found Keys: {session.DataStorage["DataStorageScanner_FoundKeys"].To<JArray>()}");
 
-			FindDataStorageKeys();
+			do
+            {
+                Console.WriteLine($"Press ENTER to start scan at \"{CharsToString(session.DataStorage["DataStorageScanner_LastQuery"].To<List<int>>())}\"");
+            } while (Console.ReadKey().Key != ConsoleKey.Enter);
 
-			Console.WriteLine($"Found keys are: {string.Join(", ", session.DataStorage["DataStorageScanner_FoundKeys"].To<string[]>())}");
+			session.Socket.PacketReceived += PacketReceived;
+
+            try
+            {
+                FindDataStorageKeys();
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine($"Error: {e.Message}");
+                Console.WriteLine(e.StackTrace);
+			}
+
+			Console.WriteLine("Done");
+            Console.WriteLine($"Found Keys: {session.DataStorage["DataStorageScanner_FoundKeys"].To<JArray>()}");
 
 			Console.ReadLine();
         }
@@ -68,13 +92,15 @@ namespace APDataStorageScanner
 
 	        while (chars.Count <= MaxKeySize)
 	        {
-		        keys.Add(IncrementChar(chars, 0));
+		        keys.Add(IncrementChar(chars, chars.Count - 1));
 
 		        if (keys.Count >= BatchSize)
                 {
                     session.DataStorage["DataStorageScanner_LastQuery"] = chars;
 
-                    QueryKeys(keys);
+                    Console.WriteLine($"Completed batch: \"{CharsToString(chars)}\"");
+
+				    QueryKeys(keys);
 
 					keys.Clear();
 		        }
@@ -83,14 +109,18 @@ namespace APDataStorageScanner
 
         static void QueryKeys(List<string> keys)
         {
-	        session.Socket.SendPacketAsync(new GetPacket {
-				Keys = keys.ToArray()
-	        });
+            Task.Run(() =>
+            {
+                session.Socket.SendPacketAsync(new GetPacket
+                {
+                    Keys = keys.ToArray()
+                });
+            });
         }
 
         static string IncrementChar(List<int> chars, int charPos)
         {
-	        if (charPos == chars.Count)
+	        if (charPos < 0)
 	        {
 		        chars.Add(0);
 
@@ -106,7 +136,7 @@ namespace APDataStorageScanner
 
 	        chars[charPos] = 0;
 
-	        return IncrementChar(chars, ++charPos);
+	        return IncrementChar(chars, --charPos);
 		}
 
         static string CharsToString(List<int> chars) => 
